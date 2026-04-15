@@ -1,40 +1,46 @@
-"""Submission + AIFeedback Pydantic schemas."""
-
-import uuid
+"""Pydantic schemas for submission endpoints."""
 from datetime import datetime
+from typing import List, Optional
+from uuid import UUID
+
 from pydantic import BaseModel
 
 
-class SubmitDraftRequest(BaseModel):
-    content: str
-    file_url: str | None = None
+class SubmissionCreate(BaseModel):
+    """What the student sends when writing or uploading an answer."""
+    content: Optional[str] = None       # Plain-text or Markdown answer
+    file_url: Optional[str] = None      # URL if the student uploads a file
 
 
-class SubmitFinalRequest(BaseModel):
-    content: str
-    file_url: str | None = None
-
-
-class AIFeedbackResponse(BaseModel):
-    id: uuid.UUID
-    criterion_id: uuid.UUID
-    estimated_score: int
-    feedback_text: str
-    generated_at: datetime
+class SubmissionResponse(BaseModel):
+    """Submission detail returned to the frontend."""
+    id: UUID
+    assignment_id: UUID
+    student_id: UUID
+    content: Optional[str]
+    file_url: Optional[str]
+    is_final: bool
+    draft_number: int
+    is_late: bool
+    similarity_score: Optional[float]   # Populated after plagiarism check
+    similarity_flagged: bool
+    submitted_at: datetime
 
     model_config = {"from_attributes": True}
 
 
-class SubmissionResponse(BaseModel):
-    id: uuid.UUID
-    assignment_id: uuid.UUID
-    student_id: uuid.UUID
-    content: str
-    file_url: str | None
+class SubmissionListItem(BaseModel):
+    """Lightweight submission entry for list views (e.g., teacher's grading queue)."""
+    id: UUID
+    student_id: UUID
+    student_name: Optional[str] = None
+    student_email: Optional[str] = None
+    content: Optional[str] = None
     is_final: bool
     draft_number: int
     is_late: bool
+    similarity_score: Optional[float] = None
+    similarity_flagged: bool
     submitted_at: datetime
-    ai_feedback: list[AIFeedbackResponse] = []
 
     model_config = {"from_attributes": True}

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ClassPulse icon">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7C3AED"/>
+      <stop offset="100%" stop-color="#3B82F6"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#09090B"/>
+  <rect x="6" y="6" width="52" height="52" rx="12" fill="url(#g)" opacity="0.18"/>
+  <path d="M32 14l4.5 11.5H50L39 33l4.2 12.6L32 38.4 20.8 45.6 25 33 14 25.5h13.5z" fill="url(#g)"/>
+</svg>

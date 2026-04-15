@@ -1,21 +1,17 @@
-import api from "./client";
-import type { TokenResponse, User } from "@/types";
+import client from './client'
+import type { User, TokenResponse } from '@/types'
 
 export const authApi = {
-  register: (data: {
-    email: string;
-    password: string;
-    full_name: string;
-    role: string;
-  }) => api.post<TokenResponse>("/auth/register", data).then((r) => r.data),
+  register: (data: { email: string; password: string; full_name: string; role: string }) =>
+    client.post<User>('/auth/register', data).then(r => r.data),
 
-  login: (email: string, password: string) =>
-    api.post<TokenResponse>("/auth/login", { email, password }).then((r) => r.data),
+  login: (data: { email: string; password: string }) =>
+    client.post<TokenResponse>('/auth/login', data).then(r => r.data),
 
-  refresh: (refresh_token: string) =>
-    api
-      .post<TokenResponse>("/auth/refresh", { refresh_token })
-      .then((r) => r.data),
+  logout: () => client.post('/auth/logout'),
 
-  me: () => api.get<User>("/auth/me").then((r) => r.data),
-};
+  me: () => client.get<User>('/auth/me').then(r => r.data),
+
+  updateProfile: (data: { full_name?: string; avatar_url?: string; password?: string }) =>
+    client.patch<User>('/auth/me', data).then(r => r.data),
+}

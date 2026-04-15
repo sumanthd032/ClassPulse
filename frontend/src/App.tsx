@@ -1,114 +1,78 @@
-/**
- * Root App component — sets up React Router, React Query, and Toaster.
- *
- * Routing strategy:
- * - Public routes: /login, /register (accessible without auth)
- * - Protected routes: wrapped in ProtectedRoute component that checks auth state.
- * - Role-based redirect: teachers go to /teacher, students go to /student.
- *
- * React Query QueryClient:
- * - staleTime: 30s — data is considered fresh for 30 seconds (no refetch on every mount)
- * - retry: 1 — retry failed requests once before showing error
- */
+import { lazy, Suspense, useEffect } from 'react'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { AppLayout } from '@/components/layout/AppLayout'
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "react-hot-toast";
+// Eagerly loaded (small, auth critical)
+import LoginPage from '@/pages/auth/LoginPage'
+import RegisterPage from '@/pages/auth/RegisterPage'
 
-import { useAuthStore } from "@/store/authStore";
-import LoginPage from "@/pages/auth/LoginPage";
-import RegisterPage from "@/pages/auth/RegisterPage";
-import StudentDashboard from "@/pages/student/StudentDashboard";
-import ClassroomPage from "@/pages/student/ClassroomPage";
-import AssignmentPage from "@/pages/student/AssignmentPage";
-import TeacherDashboard from "@/pages/teacher/TeacherDashboard";
-import AssignmentCreatePage from "@/pages/teacher/AssignmentCreatePage";
-import GradingPage from "@/pages/teacher/GradingPage";
+// Lazily loaded (split into separate chunks)
+const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
+const ClassroomsPage = lazy(() => import('@/pages/classrooms/ClassroomsPage'))
+const ClassroomDetailPage = lazy(() => import('@/pages/classrooms/ClassroomDetailPage'))
+const AssignmentDetailPage = lazy(() => import('@/pages/assignments/AssignmentDetailPage'))
+const CreateAssignmentPage = lazy(() => import('@/pages/assignments/CreateAssignmentPage'))
+const GradingPage = lazy(() => import('@/pages/GradingPage'))
+const GradesPage = lazy(() => import('@/pages/GradesPage'))
+const ProfilePage = lazy(() => import('@/pages/ProfilePage'))
+const AdminDashboardPage = lazy(() => import('@/pages/admin/AdminDashboardPage'))
+const ClassroomAnalyticsPage = lazy(() => import('@/pages/classrooms/ClassroomAnalyticsPage'))
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      retry: 1,
-    },
-  },
-});
-
-function ProtectedRoute({ children, allowedRoles }: {
-  children: React.ReactNode;
-  allowedRoles?: string[];
-}) {
-  const { user, isAuthenticated } = useAuthStore();
-  const location = useLocation();
-
-  if (!isAuthenticated()) {
-    // Redirect to login, preserving the intended URL so we can redirect back after login
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-
-  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
-    // Wrong role — redirect to their dashboard
-    return <Navigate to={user.role === "teacher" ? "/teacher" : "/student"} replace />;
-  }
-
-  return <>{children}</>;
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-[40vh]">
+      <div className="w-5 h-5 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+    </div>
+  )
 }
 
-function RootRedirect() {
-  const { user, isAuthenticated } = useAuthStore();
-  if (!isAuthenticated()) return <Navigate to="/login" replace />;
-  return <Navigate to={user?.role === "teacher" ? "/teacher" : "/student"} replace />;
+// Scroll to top on route change
+function ScrollToTop() {
+  const { pathname } = useLocation()
+  useEffect(() => { window.scrollTo(0, 0) }, [pathname])
+  return null
 }
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+    <>
+      <ScrollToTop />
+      <Suspense fallback={<PageLoader />}>
         <Routes>
           {/* Public */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
 
-          {/* Student routes */}
-          <Route path="/student" element={
-            <ProtectedRoute allowedRoles={["student"]}>
-              <StudentDashboard />
-            </ProtectedRoute>
-          } />
-          <Route path="/student/classroom/:classroomId" element={
-            <ProtectedRoute allowedRoles={["student"]}>
-              <ClassroomPage />
-            </ProtectedRoute>
-          } />
-          <Route path="/student/assignment/:assignmentId" element={
-            <ProtectedRoute allowedRoles={["student"]}>
-              <AssignmentPage />
-            </ProtectedRoute>
-          } />
+          {/* Protected app shell */}
+          <Route element={<ProtectedRoute />}>
+            <Route element={<AppLayout />}>
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/classrooms" element={<ClassroomsPage />} />
+              <Route path="/classrooms/:id" element={<ClassroomDetailPage />} />
+              <Route path="/classrooms/:id/analytics" element={<ClassroomAnalyticsPage />} />
+              <Route path="/classrooms/:id/assignments/new" element={<CreateAssignmentPage />} />
+              <Route path="/assignments/:id" element={<AssignmentDetailPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/grades" element={<GradesPage />} />
 
-          {/* Teacher routes */}
-          <Route path="/teacher" element={
-            <ProtectedRoute allowedRoles={["teacher", "admin"]}>
-              <TeacherDashboard />
-            </ProtectedRoute>
-          } />
-          <Route path="/teacher/classroom/:classroomId/create-assignment" element={
-            <ProtectedRoute allowedRoles={["teacher", "admin"]}>
-              <AssignmentCreatePage />
-            </ProtectedRoute>
-          } />
-          <Route path="/teacher/grade/:assignmentId" element={
-            <ProtectedRoute allowedRoles={["teacher", "admin"]}>
-              <GradingPage />
-            </ProtectedRoute>
-          } />
+              {/* Teacher-only */}
+              <Route element={<ProtectedRoute roles={['teacher', 'admin']} />}>
+                <Route path="/grading" element={<GradingPage />} />
+              </Route>
 
-          {/* Root → redirect based on role */}
-          <Route path="/" element={<RootRedirect />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+              {/* Admin-only */}
+              <Route element={<ProtectedRoute roles={['admin']} />}>
+                <Route path="/admin" element={<AdminDashboardPage />} />
+              </Route>
+            </Route>
+          </Route>
+
+          {/* Catch-all */}
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
-      </BrowserRouter>
-      <Toaster position="top-right" />
-    </QueryClientProvider>
-  );
+      </Suspense>
+    </>
+  )
 }

@@ -1,73 +1,80 @@
-"""Submission business logic — draft submit, final submit, fetch history."""
+"""
+Submission service — draft and final submission logic, and feedback retrieval.
+"""
+from typing import List
+from uuid import UUID
 
-import uuid
-from datetime import datetime, timezone
-
-from sqlalchemy import select, func
+from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 from app.models.assignment import Assignment
+from app.models.classroom import Enrollment, EnrollmentRole
+from app.models.feedback import AIFeedback
 from app.models.submission import Submission
-from app.models.ai_feedback import AIFeedback
-from app.models.user import User
-from app.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from app.models.user import User, UserRole
+from app.schemas.submission import SubmissionCreate
+
+
+async def _get_assignment_or_404(db: AsyncSession, assignment_id: UUID) -> Assignment:
+    """Fetches an assignment by ID or raises 404."""
+    result = await db.execute(select(Assignment).where(Assignment.id == assignment_id))
+    assignment = result.scalars().first()
+    if not assignment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+    return assignment
 
 
 async def submit_draft(
-    db: AsyncSession, student: User, assignment_id: uuid.UUID, content: str, file_url: str | None
+    db: AsyncSession,
+    assignment_id: UUID,
+    data: SubmissionCreate,
+    current_user: User,
 ) -> Submission:
     """
-    Submit a draft. Key validations:
-    1. Assignment must exist and be published.
-    2. Student must not have already made a final submission.
-    3. Draft count must not exceed max_drafts.
-    4. Deadline enforcement based on late_policy.
-    Returns the created Submission. The Celery task is queued by the API endpoint.
+    Creates a draft submission for a student.
+
+    Business rules:
+      - Only students can submit.
+      - The student cannot exceed the assignment's `max_drafts` limit.
+      - Late submissions are flagged automatically.
+
+    After saving, queues a Celery task (`generate_ai_feedback`) so the student
+    receives rubric-aligned LLM feedback asynchronously.
     """
-    # 1. Fetch assignment
-    result = await db.execute(select(Assignment).where(Assignment.id == assignment_id))
-    assignment = result.scalar_one_or_none()
-    if not assignment:
-        raise NotFoundError("Assignment")
-    if not assignment.is_published:
-        raise BadRequestError("This assignment is not yet published.")
+    if current_user.role != UserRole.student:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only students can submit assignments",
+        )
 
-    # 2. Check for existing final submission
-    final_check = await db.execute(
-        select(Submission).where(
+    assignment = await _get_assignment_or_404(db, assignment_id)
+
+    # Count existing drafts for this student on this assignment
+    count_result = await db.execute(
+        select(func.count(Submission.id)).where(
             Submission.assignment_id == assignment_id,
-            Submission.student_id == student.id,
-            Submission.is_final == True,
+            Submission.student_id == current_user.id,
+            Submission.is_final == False,  # noqa: E712
         )
     )
-    if final_check.scalar_one_or_none():
-        raise BadRequestError("You have already made a final submission for this assignment.")
+    draft_count = count_result.scalar() or 0
 
-    # 3. Count existing drafts
-    draft_count_result = await db.execute(
-        select(func.count()).where(
-            Submission.assignment_id == assignment_id,
-            Submission.student_id == student.id,
-            Submission.is_final == False,
-        )
-    )
-    draft_count = draft_count_result.scalar_one()
     if draft_count >= assignment.max_drafts:
-        raise BadRequestError(
-            f"Draft limit reached ({assignment.max_drafts}). Please submit your final version."
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Maximum draft limit ({assignment.max_drafts}) reached for this assignment",
         )
 
-    # 4. Check late status
-    now = datetime.now(timezone.utc)
-    is_late = now > assignment.deadline.replace(tzinfo=timezone.utc)
-    if is_late and assignment.late_policy == "block":
-        raise BadRequestError("The deadline has passed and late submissions are not allowed.")
+    from datetime import datetime, timezone
+    is_late = datetime.now(timezone.utc) > assignment.deadline
 
     submission = Submission(
-        assignment_id=assignment_id,
-        student_id=student.id,
-        content=content,
-        file_url=file_url,
+        assignment_id=assignment.id,
+        student_id=current_user.id,
+        content=data.content,
+        file_url=data.file_url,
         is_final=False,
         draft_number=draft_count + 1,
         is_late=is_late,
@@ -75,90 +82,230 @@ async def submit_draft(
     db.add(submission)
     await db.commit()
     await db.refresh(submission)
+
+    # Queue AI feedback asynchronously — does not block the HTTP response
+    from app.workers.ai_feedback import generate_ai_feedback
+    generate_ai_feedback.delay(str(submission.id))
+
     return submission
 
 
 async def submit_final(
-    db: AsyncSession, student: User, assignment_id: uuid.UUID, content: str, file_url: str | None
+    db: AsyncSession,
+    assignment_id: UUID,
+    data: SubmissionCreate,
+    current_user: User,
 ) -> Submission:
-    """Lock in the final submission. Immutable after this point."""
-    result = await db.execute(select(Assignment).where(Assignment.id == assignment_id))
-    assignment = result.scalar_one_or_none()
-    if not assignment:
-        raise NotFoundError("Assignment")
-    if not assignment.is_published:
-        raise BadRequestError("This assignment is not yet published.")
+    """
+    Creates the one and only final submission.
 
-    # Check deadline / late policy
-    now = datetime.now(timezone.utc)
-    is_late = now > assignment.deadline.replace(tzinfo=timezone.utc)
-    if is_late and assignment.late_policy == "block":
-        raise BadRequestError("The deadline has passed and late submissions are not allowed.")
+    Business rules:
+      - Only students can submit.
+      - A student can only have one final submission per assignment (enforced by
+        a partial unique index in the DB and a check here for a clean error).
+      - Late submissions are flagged automatically.
 
-    # Check not already finalized
-    existing_final = await db.execute(
+    After saving, queues a Celery plagiarism-check task.
+    """
+    if current_user.role != UserRole.student:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only students can submit assignments",
+        )
+
+    assignment = await _get_assignment_or_404(db, assignment_id)
+
+    # Check for existing final submission
+    existing_result = await db.execute(
         select(Submission).where(
             Submission.assignment_id == assignment_id,
-            Submission.student_id == student.id,
-            Submission.is_final == True,
+            Submission.student_id == current_user.id,
+            Submission.is_final == True,  # noqa: E712
         )
     )
-    if existing_final.scalar_one_or_none():
-        raise BadRequestError("Final submission already exists.")
-
-    # Count drafts to set draft_number
-    draft_count_result = await db.execute(
-        select(func.count()).where(
-            Submission.assignment_id == assignment_id,
-            Submission.student_id == student.id,
+    if existing_result.scalars().first():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You have already submitted your final answer for this assignment",
         )
-    )
-    draft_count = draft_count_result.scalar_one()
 
+    from datetime import datetime, timezone
+    is_late = datetime.now(timezone.utc) > assignment.deadline
+
+    # draft_number=0 is our sentinel for "this is the final, not a numbered draft"
     submission = Submission(
-        assignment_id=assignment_id,
-        student_id=student.id,
-        content=content,
-        file_url=file_url,
+        assignment_id=assignment.id,
+        student_id=current_user.id,
+        content=data.content,
+        file_url=data.file_url,
         is_final=True,
-        draft_number=draft_count + 1,
+        draft_number=0,
         is_late=is_late,
     )
     db.add(submission)
     await db.commit()
     await db.refresh(submission)
+
+    # Queue plagiarism check + AI auto-grading asynchronously
+    from app.workers.similarity import check_plagiarism
+    from app.workers.auto_grade import auto_grade_submission
+    check_plagiarism.delay(str(submission.id))
+    auto_grade_submission.delay(str(submission.id))
+
     return submission
 
 
-async def get_my_submissions(
-    db: AsyncSession, student_id: uuid.UUID, assignment_id: uuid.UUID
-) -> list[Submission]:
-    """Return all drafts + final submission for a student, with AI feedback attached."""
-    subs_result = await db.execute(
-        select(Submission).where(
-            Submission.assignment_id == assignment_id,
-            Submission.student_id == student_id,
-        ).order_by(Submission.draft_number)
-    )
-    submissions = list(subs_result.scalars().all())
+async def list_submissions_for_assignment(
+    db: AsyncSession, assignment_id: UUID, current_user: User
+) -> List[Submission]:
+    """
+    Returns all submissions (drafts + finals) for an assignment.
+    Only the teacher of that classroom can call this.
+    """
+    assignment = await _get_assignment_or_404(db, assignment_id)
 
-    for sub in submissions:
-        fb_result = await db.execute(
-            select(AIFeedback).where(AIFeedback.submission_id == sub.id)
+    # Verify caller is a teacher in this classroom
+    enroll_result = await db.execute(
+        select(Enrollment).where(
+            Enrollment.classroom_id == assignment.classroom_id,
+            Enrollment.user_id == current_user.id,
+            Enrollment.role == EnrollmentRole.co_teacher,
         )
-        sub.__dict__["ai_feedback"] = list(fb_result.scalars().all())
+    )
+    if not enroll_result.scalars().first():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the classroom teacher can view all submissions",
+        )
 
-    return submissions
-
-
-async def get_all_submissions_for_assignment(
-    db: AsyncSession, assignment_id: uuid.UUID
-) -> list[Submission]:
-    """Return all final submissions for an assignment (teacher view)."""
     result = await db.execute(
-        select(Submission).where(
-            Submission.assignment_id == assignment_id,
-            Submission.is_final == True,
-        )
+        select(Submission)
+        .where(Submission.assignment_id == assignment_id)
+        .order_by(Submission.submitted_at.desc())
     )
-    return list(result.scalars().all())
+    return result.scalars().all()
+
+
+async def get_my_submissions(
+    db: AsyncSession, assignment_id: UUID, current_user: User
+) -> List[Submission]:
+    """Returns all drafts and the final submission for the authenticated student."""
+    await _get_assignment_or_404(db, assignment_id)
+
+    result = await db.execute(
+        select(Submission)
+        .where(
+            Submission.assignment_id == assignment_id,
+            Submission.student_id == current_user.id,
+        )
+        .order_by(Submission.draft_number)
+    )
+    return result.scalars().all()
+
+
+async def get_submission(
+    db: AsyncSession, submission_id: UUID, current_user: User
+) -> Submission:
+    """
+    Returns a single submission.
+    Students can only fetch their own submissions.
+    Teachers can fetch any submission in their classroom.
+    """
+    result = await db.execute(
+        select(Submission).where(Submission.id == submission_id)
+    )
+    submission = result.scalars().first()
+
+    if not submission:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+
+    # Students can only see their own work
+    if current_user.role == UserRole.student:
+        if str(submission.student_id) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only view your own submissions",
+            )
+    else:
+        # Teachers must be enrolled in the same classroom
+        assignment = await _get_assignment_or_404(db, submission.assignment_id)
+        enroll_result = await db.execute(
+            select(Enrollment).where(
+                Enrollment.classroom_id == assignment.classroom_id,
+                Enrollment.user_id == current_user.id,
+                Enrollment.role == EnrollmentRole.co_teacher,
+            )
+        )
+        if not enroll_result.scalars().first():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this submission",
+            )
+
+    return submission
+
+
+async def get_feedback(
+    db: AsyncSession, submission_id: UUID, current_user: User
+) -> List[AIFeedback]:
+    """
+    Returns the AI feedback records for a submission.
+
+    Students can only view feedback on their own submissions.
+    Teachers (co_teacher) can view feedback for any submission in their classroom.
+    Returns an empty list if the Celery worker hasn't completed yet.
+    """
+    result = await db.execute(
+        select(Submission).where(Submission.id == submission_id)
+    )
+    submission = result.scalars().first()
+
+    if not submission:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+
+    if current_user.role == UserRole.student:
+        # Students can only see their own feedback
+        if str(submission.student_id) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only view feedback on your own submissions",
+            )
+    else:
+        # Teachers must be co_teacher in the submission's classroom
+        assignment = await _get_assignment_or_404(db, submission.assignment_id)
+        enroll_result = await db.execute(
+            select(Enrollment).where(
+                Enrollment.classroom_id == assignment.classroom_id,
+                Enrollment.user_id == current_user.id,
+                Enrollment.role == EnrollmentRole.co_teacher,
+            )
+        )
+        if not enroll_result.scalars().first():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this submission's feedback",
+            )
+
+    from app.models.assignment import RubricCriteria
+    feedback_result = await db.execute(
+        select(AIFeedback, RubricCriteria.name, RubricCriteria.max_marks)
+        .outerjoin(RubricCriteria, RubricCriteria.id == AIFeedback.criterion_id)
+        .where(AIFeedback.submission_id == submission_id)
+        .order_by(AIFeedback.generated_at)
+    )
+    rows = feedback_result.all()
+    enriched = []
+    for fb, crit_name, crit_max in rows:
+        item = {
+            "id": fb.id,
+            "submission_id": fb.submission_id,
+            "criterion_id": fb.criterion_id,
+            "criterion_name": crit_name,
+            "criterion_max_marks": crit_max,
+            "estimated_score": fb.estimated_score,
+            "feedback_text": fb.feedback_text,
+            "suggested_level": fb.suggested_level,
+            "generated_at": fb.generated_at,
+        }
+        enriched.append(item)
+    return enriched

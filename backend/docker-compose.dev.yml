@@ -1,0 +1,137 @@
+
+# ============================================================
+# ClassPulse — Development Docker Compose
+# ============================================================
+# Starts all 6 services:
+#   db       PostgreSQL 16
+#   redis    Redis 7
+#   api      FastAPI (hot-reload via --reload)
+#   worker   Celery worker (AI feedback + plagiarism check)
+#   beat     Celery Beat scheduler (cron tasks)
+#   migrate  One-shot Alembic migration runner (exits when done)
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up --build
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # PostgreSQL database
+  # ----------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: classpulse
+      POSTGRES_USER: classpulse
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5433:5432"   # host 5433 → avoids conflict with any local Postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U classpulse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ----------------------------------------------------------
+  # Redis (broker + cache + rate-limit store)
+  # ----------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+    ports:
+      - "6380:6379"   # host 6380 → avoids conflict with any local Redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ----------------------------------------------------------
+  # Alembic migrations (runs once, then exits)
+  # ----------------------------------------------------------
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: alembic upgrade head
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ----------------------------------------------------------
+  # FastAPI API server (dev mode with hot-reload)
+  # ----------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app   # Mount source for hot-reload
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # ----------------------------------------------------------
+  # Celery worker (AI feedback + plagiarism check)
+  # ----------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      celery -A app.workers.celery_app worker
+      --loglevel=info
+      --concurrency=2
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - .:/app
+
+  # ----------------------------------------------------------
+  # Celery Beat (cron scheduler)
+  # ----------------------------------------------------------
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      celery -A app.workers.celery_app beat
+      --loglevel=info
+      --scheduler celery.beat:PersistentScheduler
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+
+volumes:
+  pgdata:

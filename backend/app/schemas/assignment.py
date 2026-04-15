@@ -1,72 +1,78 @@
-"""Assignment + RubricCriterion Pydantic schemas."""
-
-import uuid
+"""Pydantic schemas for assignment and rubric endpoints."""
 from datetime import datetime
-from decimal import Decimal
-from pydantic import BaseModel, Field
-from app.models.assignment import SubmissionType, LatePolicy
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, Field, model_validator
+
+from app.models.assignment import LatePolicy, SubmissionType
 
 
-class RubricLevelSchema(BaseModel):
-    excellent: str = ""
-    good: str = ""
-    average: str = ""
-    poor: str = ""
+# ---------------------------------------------------------------------------
+# Rubric
+# ---------------------------------------------------------------------------
+
+class RubricCriteriaCreate(BaseModel):
+    """A single rubric criterion supplied at assignment creation time."""
+    name: str = Field(..., max_length=100)
+    max_marks: int = Field(..., ge=1)
+    # Expected format: {"excellent": "...", "good": "...", "average": "...", "poor": "..."}
+    levels: Dict[str, str]
 
 
-class RubricCriterionCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    max_marks: int = Field(ge=1)
-    order_index: int = Field(default=0, ge=0)
-    levels: RubricLevelSchema = RubricLevelSchema()
-
-
-class RubricCriterionResponse(BaseModel):
-    id: uuid.UUID
-    assignment_id: uuid.UUID
+class RubricCriteriaResponse(BaseModel):
+    id: UUID
     name: str
     max_marks: int
     order_index: int
-    levels: dict
+    levels: Dict[str, Any]
 
     model_config = {"from_attributes": True}
 
 
-class CreateAssignmentRequest(BaseModel):
-    title: str = Field(min_length=3, max_length=200)
-    description: str = ""
+# ---------------------------------------------------------------------------
+# Assignment
+# ---------------------------------------------------------------------------
+
+class AssignmentCreate(BaseModel):
+    """
+    Full assignment payload including an embedded rubric.
+    The sum of `criteria[*].max_marks` must equal `total_marks` — enforced in
+    the service layer to provide a descriptive error.
+    """
+    title: str = Field(..., max_length=200)
+    description: Optional[str] = None
     deadline: datetime
-    total_marks: int = Field(ge=1)
+    total_marks: int = Field(..., ge=1)
     submission_type: SubmissionType = SubmissionType.text
-    max_drafts: int = Field(default=3, ge=1, le=10)
+    max_drafts: int = Field(3, ge=1, le=10)
     late_policy: LatePolicy = LatePolicy.penalty
-    penalty_per_day: Decimal = Decimal("0")
-    rubric_criteria: list[RubricCriterionCreate] = Field(default_factory=list)
+    penalty_per_day: Optional[float] = Field(None, ge=0, le=100)
+    is_published: bool = True
+    criteria: List[RubricCriteriaCreate] = Field(..., min_length=1)
 
 
-class UpdateAssignmentRequest(BaseModel):
-    title: str | None = None
-    description: str | None = None
-    deadline: datetime | None = None
-    total_marks: int | None = None
-    late_policy: LatePolicy | None = None
-    penalty_per_day: Decimal | None = None
+class AssignmentUpdate(BaseModel):
+    """Partial update for a draft/unpublished assignment."""
+    title: Optional[str] = Field(None, max_length=200)
+    description: Optional[str] = None
+    deadline: Optional[datetime] = None
+    is_published: Optional[bool] = None
 
 
 class AssignmentResponse(BaseModel):
-    id: uuid.UUID
-    classroom_id: uuid.UUID
+    id: UUID
+    classroom_id: UUID
     title: str
-    description: str
+    description: Optional[str]
     deadline: datetime
     total_marks: int
     submission_type: SubmissionType
     max_drafts: int
     late_policy: LatePolicy
-    penalty_per_day: Decimal
+    penalty_per_day: Optional[float]
     is_published: bool
-    created_by: uuid.UUID
-    created_at: datetime
-    rubric_criteria: list[RubricCriterionResponse] = []
+    created_by: UUID
+    criteria: List[RubricCriteriaResponse] = []
 
     model_config = {"from_attributes": True}

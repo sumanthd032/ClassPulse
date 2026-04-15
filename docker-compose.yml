@@ -1,123 +1,154 @@
-version: "3.9"
+# ============================================================
+# ClassPulse — Full-Stack Docker Compose (Production-like)
+# ============================================================
+# Services:
+#   db        PostgreSQL 16    (internal only — no host port)
+#   redis     Redis 7          (internal only — no host port)
+#   migrate   Alembic one-shot migration runner
+#   api       FastAPI          → localhost:8000
+#   worker    Celery worker
+#   beat      Celery Beat
+#   frontend  React SPA/Nginx  → localhost:3001
+#
+# NOTE: db and redis are NOT exposed on host ports to avoid
+#       conflicts with other local Postgres/Redis instances.
+#       Services communicate via the internal Docker network.
+#
+# Usage:
+#   cp backend/.env.example backend/.env   # fill in secrets
+#   docker compose up --build
+# ============================================================
 
 services:
+
+  # ----------------------------------------------------------
+  # PostgreSQL 16  (internal only)
+  # ----------------------------------------------------------
   db:
     image: postgres:16-alpine
-    container_name: classpulse_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-classpulse}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-classpulse_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-classpulse}
+      POSTGRES_DB: classpulse
+      POSTGRES_USER: classpulse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-classpulse}"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U classpulse"]
+      interval: 5s
       timeout: 5s
-      retries: 5
-    networks:
-      - classpulse_net
+      retries: 10
 
+  # ----------------------------------------------------------
+  # Redis 7  (internal only)
+  # ----------------------------------------------------------
   redis:
     image: redis:7-alpine
-    container_name: classpulse_redis
     restart: unless-stopped
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
-    volumes:
-      - redis_data:/data
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save ""
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - classpulse_net
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
+  # ----------------------------------------------------------
+  # Alembic migrations (exits when done)
+  # ----------------------------------------------------------
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: alembic upgrade head
+    env_file: ./backend/.env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ----------------------------------------------------------
+  # FastAPI API  →  http://localhost:8000
+  # ----------------------------------------------------------
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: classpulse_api
-    restart: unless-stopped
-    env_file: .env
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 2
+    env_file: ./backend/.env
+    ports:
+      - "8000:8000"
     volumes:
-      - ./backend:/app
-      - uploads_data:/app/uploads
+      - uploads:/uploads
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    ports:
-      - "8000:8000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - classpulse_net
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
+  # ----------------------------------------------------------
+  # Celery worker
+  # ----------------------------------------------------------
   worker:
     build:
       context: ./backend
-      dockerfile: Dockerfile.worker
-    container_name: classpulse_worker
-    restart: unless-stopped
-    env_file: .env
+      dockerfile: Dockerfile
+    command: >
+      celery -A app.workers.celery_app worker
+      --loglevel=info
+      --concurrency=2
+    env_file: ./backend/.env
     volumes:
-      - ./backend:/app
-      - uploads_data:/app/uploads
+      - uploads:/uploads
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    networks:
-      - classpulse_net
-    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
+  # ----------------------------------------------------------
+  # Celery Beat
+  # ----------------------------------------------------------
   beat:
     build:
       context: ./backend
-      dockerfile: Dockerfile.worker
-    container_name: classpulse_beat
-    restart: unless-stopped
-    env_file: .env
-    volumes:
-      - ./backend:/app
+      dockerfile: Dockerfile
+    command: >
+      celery -A app.workers.celery_app beat
+      --loglevel=info
+      --scheduler celery.beat:PersistentScheduler
+    env_file: ./backend/.env
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_healthy
-    networks:
-      - classpulse_net
-    command: celery -A app.workers.celery_app beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
-
-  nginx:
-    build:
-      context: ./nginx
-      dockerfile: Dockerfile
-    container_name: classpulse_nginx
     restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # Frontend (React SPA via Nginx)  →  http://localhost:3001
+  # (Using 3001 to avoid conflicts with other local servers)
+  # ----------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - uploads_data:/app/uploads:ro
+      - "3001:80"
     depends_on:
       - api
-    networks:
-      - classpulse_net
+    restart: unless-stopped
 
 volumes:
-  postgres_data:
-  redis_data:
-  uploads_data:
-
-networks:
-  classpulse_net:
-    driver: bridge
+  pgdata:
+  uploads:

@@ -1,103 +1,100 @@
-/**
- * LoginPage — handles the login form, calls POST /auth/login, stores tokens.
- *
- * React Hook Form + Zod pattern:
- * - Define a Zod schema with validation rules.
- * - useForm() gives us register(), handleSubmit(), formState.errors.
- * - On submit, handleSubmit validates the form and calls our onSubmit function.
- * - Errors appear inline without re-renders for each keystroke (RHF is uncontrolled by default).
- */
-
-import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import { useNavigate, Link } from "react-router-dom";
-import toast from "react-hot-toast";
-
-import { authApi } from "@/api/auth";
-import { useAuthStore } from "@/store/authStore";
-import { Input } from "@/components/common/Input";
-import { Button } from "@/components/common/Button";
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+import { Link } from 'react-router-dom'
+import { Zap, Sparkles, ShieldCheck, Gauge } from 'lucide-react'
+import { useAuth } from '@/hooks/useAuth'
+import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/Button'
 
 const schema = z.object({
-  email: z.string().email("Enter a valid email"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
-});
-
-type FormData = z.infer<typeof schema>;
+  email: z.string().email('Enter a valid email'),
+  password: z.string().min(1, 'Password is required'),
+})
+type FormData = z.infer<typeof schema>
 
 export default function LoginPage() {
-  const navigate = useNavigate();
-  const { setAuth } = useAuthStore();
-  const [loading, setLoading] = useState(false);
-
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<FormData>({ resolver: zodResolver(schema) });
-
-  const onSubmit = async (data: FormData) => {
-    setLoading(true);
-    try {
-      const response = await authApi.login(data.email, data.password);
-      setAuth(response.user, response.access_token, response.refresh_token);
-      toast.success(`Welcome back, ${response.user.full_name}!`);
-      navigate(response.user.role === "teacher" ? "/teacher" : "/student");
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail ?? "Login failed. Check your credentials.";
-      toast.error(msg);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { login, isLoggingIn } = useAuth()
+  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
+    resolver: zodResolver(schema),
+  })
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-md">
-        {/* Logo */}
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-white font-bold text-xl">
-            CP
+    <div className="min-h-screen bg-bg-base relative overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-24 left-10 w-64 h-64 bg-violet-500/20 rounded-full blur-3xl" />
+        <div className="absolute bottom-16 right-10 w-72 h-72 bg-blue-500/20 rounded-full blur-3xl" />
+      </div>
+
+      <div className="relative min-h-screen grid grid-cols-1 lg:grid-cols-2">
+        <div className="hidden lg:flex items-center justify-center px-12">
+          <div className="max-w-md">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-zinc-300 text-xs mb-6">
+              <Sparkles className="w-3.5 h-3.5 text-violet-300" />
+              AI-powered classroom workflow
+            </div>
+            <h1 className="text-4xl font-bold text-zinc-100 leading-tight">
+              Teach faster. Learn better. All in one modern workspace.
+            </h1>
+            <p className="text-zinc-400 mt-4">
+              ClassPulse helps students iterate with instant AI feedback while teachers grade with confidence.
+            </p>
+            <div className="mt-8 grid gap-3">
+              <div className="flex items-center gap-3 text-sm text-zinc-300">
+                <Gauge className="w-4 h-4 text-emerald-400" /> Real-time dashboards
+              </div>
+              <div className="flex items-center gap-3 text-sm text-zinc-300">
+                <ShieldCheck className="w-4 h-4 text-blue-400" /> Plagiarism and grading safeguards
+              </div>
+            </div>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">ClassPulse</h1>
-          <p className="mt-1 text-sm text-gray-600">The Classroom That Teaches Back</p>
         </div>
 
-        <div className="rounded-2xl bg-white p-8 shadow-sm ring-1 ring-gray-200">
-          <h2 className="mb-6 text-lg font-semibold text-gray-900">Sign in to your account</h2>
+        <div className="flex items-center justify-center p-4 sm:p-8">
+          <div className="w-full max-w-sm">
+            <div className="flex items-center justify-center gap-2.5 mb-8">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-accent to-violet-400 flex items-center justify-center shadow-glow">
+                <Zap className="w-5 h-5 text-white" />
+              </div>
+              <span className="text-xl font-bold text-zinc-100 tracking-tight">ClassPulse</span>
+            </div>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
-            <Input
-              label="Email"
-              type="email"
-              placeholder="you@example.com"
-              error={errors.email?.message}
-              {...register("email")}
-            />
-            <Input
-              label="Password"
-              type="password"
-              placeholder="••••••••"
-              error={errors.password?.message}
-              {...register("password")}
-            />
+            <div className="bg-bg-surface/90 border border-white/10 rounded-2xl p-8 shadow-modal backdrop-blur-xl">
+              <div className="mb-6">
+                <h2 className="text-lg font-semibold text-zinc-100">Welcome back</h2>
+                <p className="text-sm text-zinc-500 mt-1">Sign in to your account</p>
+              </div>
 
-            <Button type="submit" loading={loading} className="mt-2 w-full">
-              Sign In
-            </Button>
-          </form>
+              <form onSubmit={handleSubmit(data => login(data))} className="space-y-4">
+                <Input
+                  label="Email"
+                  type="email"
+                  placeholder="you@school.edu"
+                  error={errors.email?.message}
+                  {...register('email')}
+                />
+                <Input
+                  label="Password"
+                  type="password"
+                  placeholder="••••••••"
+                  error={errors.password?.message}
+                  {...register('password')}
+                />
+                <Button type="submit" className="w-full" loading={isLoggingIn} size="md">
+                  Sign in
+                </Button>
+              </form>
 
-          <p className="mt-4 text-center text-sm text-gray-600">
-            Don&apos;t have an account?{" "}
-            <Link to="/register" className="font-medium text-blue-600 hover:text-blue-700">
-              Create one
-            </Link>
-          </p>
+              <p className="text-sm text-zinc-500 text-center mt-5">
+                Don't have an account?{' '}
+                <Link to="/register" className="text-accent hover:text-accent/80 transition-colors font-medium">
+                  Create one
+                </Link>
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
-  );
+  )
 }

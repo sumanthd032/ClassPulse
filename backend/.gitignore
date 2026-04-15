@@ -1,0 +1,51 @@
+# =========================
+# Python & Environment
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# =========================
+# Virtual Environment
+# =========================
+venv/
+env/
+ENV/
+.venv/
+
+# =========================
+# Environment Variables (CRITICAL)
+# =========================
+.env
+.env.local
+.env.development
+
+# =========================
+# Celery & Background Workers
+# =========================
+celerybeat-schedule
+celerybeat-schedule.db
+celerybeat-schedule.bak
+celerybeat-schedule.dir
+celerybeat.pid
+celerybeat-schedule.dat
+
+# =========================
+# VS Code & IDEs
+# =========================
+.vscode/
+.idea/
+*.swp
+
+# =========================
+# OS Generated Files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Logs & Databases
+# =========================
+*.log
+*.sqlite3

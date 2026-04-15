@@ -1,38 +1,68 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import list
+"""
+Application settings loaded from environment variables via pydantic-settings.
+
+Create a `.env` file (see .env.example) — never commit real secrets.
+"""
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
+    # -----------------------------------------------------------------------
     # Database
-    database_url: str
+    # -----------------------------------------------------------------------
+    # Async PostgreSQL URL for SQLAlchemy + asyncpg
+    DATABASE_URL: str  # e.g. postgresql+asyncpg://user:pass@db:5432/classpulse
 
-    # Redis
-    redis_url: str = "redis://localhost:6379/0"
+    # -----------------------------------------------------------------------
+    # Redis / Message Broker
+    # -----------------------------------------------------------------------
+    REDIS_URL: str  # e.g. redis://redis:6379/0
 
-    # Auth
-    jwt_secret: str
-    jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 15
-    refresh_token_expire_days: int = 7
+    # -----------------------------------------------------------------------
+    # JWT Authentication
+    # -----------------------------------------------------------------------
+    JWT_SECRET: str
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15    # Short-lived — rotate via refresh
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7       # Stored in Redis for revocation
 
-    # LLM
-    llm_api_key: str = ""
-    llm_model: str = "gpt-4o-mini"
-    llm_max_calls_per_student_per_hour: int = 5
+    # -----------------------------------------------------------------------
+    # LLM (Google Gemini)
+    # -----------------------------------------------------------------------
+    LLM_API_KEY: str
+    LLM_MODEL: str = "gemini-2.0-flash"     # Override in .env for other models
 
-    # File storage
-    upload_dir: str = "/app/uploads"
-    aws_s3_bucket: str = ""
-    aws_access_key_id: str = ""
-    aws_secret_access_key: str = ""
-    aws_region: str = "ap-south-1"
+    # -----------------------------------------------------------------------
+    # Feature Flags
+    # -----------------------------------------------------------------------
+    # Max AI feedback calls a student can trigger per hour per assignment.
+    # Enforced via Redis sliding-window rate limiting in the Celery worker.
+    LLM_RATE_LIMIT_PER_HOUR: int = 5
 
-    # App
-    cors_origins: list[str] = ["http://localhost:5173"]
-    debug: bool = False
-    environment: str = "development"
+    # -----------------------------------------------------------------------
+    # SMTP / Email (optional — leave empty to disable)
+    # -----------------------------------------------------------------------
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = "noreply@classpulse.app"
+    EMAIL_ENABLED: bool = False
+
+    # -----------------------------------------------------------------------
+    # File uploads
+    # -----------------------------------------------------------------------
+    UPLOAD_DIR: str = "/uploads"
+    MAX_UPLOAD_SIZE_MB: int = 10
+
+    # -----------------------------------------------------------------------
+    # CORS
+    # -----------------------------------------------------------------------
+    CORS_ORIGINS: str = "http://localhost:3000"  # Comma-separated list
+
+    class Config:
+        env_file = ".env"
+        extra = "ignore"
 
 
 settings = Settings()

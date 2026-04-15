@@ -40,3 +40,16 @@ backend/migrations/versions/*.pyc
 
 # Logs
 *.log
+celerybeat-schedule
+celerybeat.pid
+
+# Build artifacts
+frontend/dist/
+backend/dist/
+
+# Secrets
+*.pem
+*.key
+
+# Docker
+.docker/

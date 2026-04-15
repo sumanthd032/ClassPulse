@@ -1,37 +1,46 @@
-"""Grade Pydantic schemas."""
-
-import uuid
+"""Pydantic schemas for grading endpoints."""
 from datetime import datetime
+from typing import List, Optional
+from uuid import UUID
+
 from pydantic import BaseModel, Field
 
 
-class CriterionGrade(BaseModel):
-    criterion_id: uuid.UUID
-    score: int = Field(ge=0)
-    level: str = Field(pattern="^(excellent|good|average|poor)$")
-    feedback: str = ""
+class CriterionScoreCreate(BaseModel):
+    criterion_id: UUID
+    score: int = Field(..., ge=0)
+    comment: Optional[str] = None
 
 
-class GradeSubmissionRequest(BaseModel):
-    """Teacher grades a submission criterion by criterion."""
-    grades: list[CriterionGrade]
+class CriterionScoreResponse(BaseModel):
+    id: UUID
+    criterion_id: UUID
+    score: int
+    comment: Optional[str] = None
+
+    model_config = {"from_attributes": True}
 
 
-class BulkFeedbackRequest(BaseModel):
-    """Apply the same feedback to multiple students (Phase 3 full implementation)."""
-    submission_ids: list[uuid.UUID]
-    feedback: str
+class GradeCreate(BaseModel):
+    """What the teacher sends when grading a final submission."""
+    total_score: int = Field(..., ge=0)
+    teacher_comments: Optional[str] = None
+    # Grades are NEVER auto-released; teacher must explicitly set True
+    is_released: bool = False
+    criterion_scores: Optional[List[CriterionScoreCreate]] = None
 
 
 class GradeResponse(BaseModel):
-    id: uuid.UUID
-    submission_id: uuid.UUID
-    criterion_id: uuid.UUID
-    score: int
-    level: str
-    feedback: str
-    graded_by: uuid.UUID
+    """Grade detail returned to the frontend."""
+    id: UUID
+    submission_id: UUID
+    assignment_id: UUID
+    student_id: UUID
+    grader_id: UUID
+    total_score: int
+    teacher_comments: Optional[str] = None
     is_released: bool
-    created_at: datetime
+    graded_at: datetime
+    criterion_grades: List[CriterionScoreResponse] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
