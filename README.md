@@ -1,8 +1,8 @@
 <div align="center">
 
-# ⚡ ClassPulse
+# ClassPulse
 
-**AI-powered classroom management for engineering colleges.**  
+**AI-powered classroom management for engineering colleges.**
 Students submit drafts and get instant LLM feedback before the deadline. Teachers grade faster with AI-suggested scores and real-time plagiarism flags.
 
 [![CI](https://github.com/your-username/ClassPulse/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/ClassPulse/actions/workflows/ci.yml)
@@ -12,13 +12,13 @@ Students submit drafts and get instant LLM feedback before the deadline. Teacher
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)
 ![License](https://img.shields.io/badge/License-MIT-violet)
 
-[**Live Demo**](#) · [**API Docs**](#api-documentation) · [**Report Bug**](https://github.com/your-username/ClassPulse/issues)
+[**API Docs**](#api-documentation) · [**Report Bug**](https://github.com/your-username/ClassPulse/issues)
 
 </div>
 
 ---
 
-## ✨ What Makes ClassPulse Different
+## What Makes ClassPulse Different
 
 | Feature | Description |
 |---|---|
@@ -31,7 +31,7 @@ Students submit drafts and get instant LLM feedback before the deadline. Teacher
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -51,15 +51,15 @@ Students submit drafts and get instant LLM feedback before the deadline. Teacher
 └──────────────────┘    └──────────┬──────────────────────┘
                                    │ Celery tasks
                         ┌──────────▼──────────────────────┐
-                        │         Celery Workers            │
+                        │         Celery Workers           │
                         │  AI feedback · Similarity check  │
-                        │  Late penalties · Reminders       │
-                        └─────────────────────────────────-┘
+                        │  Late penalties · Reminders      │
+                        └─────────────────────────────────┘
 ```
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -79,7 +79,7 @@ cp backend/.env.example backend/.env
 Open `backend/.env` and fill in:
 
 ```env
-JWT_SECRET=<random 32+ char string>
+JWT_SECRET=<random 32+ char string>   # python -c "import secrets; print(secrets.token_hex(32))"
 LLM_API_KEY=<your Gemini API key>
 ```
 
@@ -97,11 +97,11 @@ docker compose up --build
 | **API** | http://localhost:8000 |
 | **API Docs (Swagger)** | http://localhost:8000/api/docs |
 
-First build takes ~3 minutes (downloads images and wheels). Subsequent builds are cached and start in seconds.
+First build takes ~3 minutes (downloads images and installs dependencies). Subsequent builds are cached and start in seconds.
 
 ---
 
-## 🛠️ Development (hot-reload)
+## Development (hot-reload)
 
 Run backend and frontend separately for the best developer experience.
 
@@ -109,13 +109,15 @@ Run backend and frontend separately for the best developer experience.
 
 ```bash
 cd backend
-cp .env.example .env   # fill in secrets
+cp .env.example .env   # fill in JWT_SECRET and LLM_API_KEY
 
-# Start only db + redis + migrate + api (with --reload)
+# Starts db + redis + migrate + api (with --reload) + worker + beat
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-Backend hot-reloads on every file save. Postgres exposed on `localhost:5433`, Redis on `localhost:6380`.
+- API hot-reloads on every file save
+- Postgres exposed on `localhost:5433` (avoids conflict with any local Postgres)
+- Redis exposed on `localhost:6380`
 
 ### Frontend
 
@@ -125,11 +127,11 @@ npm install
 npm run dev   # http://localhost:3000
 ```
 
-Vite proxies `/api` → `localhost:8000` and `/ws` → `ws://localhost:8000` automatically.
+Vite proxies `/api` → `http://localhost:8000` and `/ws` → `ws://localhost:8000` automatically.
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 ClassPulse/
@@ -149,11 +151,11 @@ ClassPulse/
 ├── frontend/
 │   ├── src/
 │   │   ├── api/             # Axios API clients (one file per domain)
-│   │   ├── components/      # UI primitives + layout + notifications
+│   │   ├── components/      # UI primitives, layout, charts, command palette
 │   │   ├── hooks/           # useAuth, useWebSocket
 │   │   ├── pages/           # Route-level page components
-│   │   ├── stores/          # Zustand state (auth, notifications)
-│   │   └── types/           # TypeScript interfaces
+│   │   ├── stores/          # Zustand state (auth, notifications, UI)
+│   │   └── types/           # TypeScript interfaces (mirrors backend schemas)
 │   ├── Dockerfile
 │   ├── nginx.conf
 │   └── vite.config.ts
@@ -170,7 +172,7 @@ ClassPulse/
 
 ---
 
-## 🔌 API Documentation
+## API Documentation
 
 Interactive Swagger UI is available at `/api/docs` when running locally.
 
@@ -180,6 +182,7 @@ Interactive Swagger UI is available at `/api/docs` when running locally.
 |---|---|---|
 | `POST` | `/api/v1/auth/register` | Create account |
 | `POST` | `/api/v1/auth/login` | Get JWT tokens |
+| `POST` | `/api/v1/auth/refresh` | Rotate access token |
 | `PATCH` | `/api/v1/auth/me` | Update profile / change password |
 | `GET` | `/api/v1/classrooms` | List enrolled / owned classrooms |
 | `POST` | `/api/v1/classrooms` | Create classroom (teacher) |
@@ -188,13 +191,15 @@ Interactive Swagger UI is available at `/api/docs` when running locally.
 | `POST` | `/api/v1/assignments/{id}/drafts` | Submit draft → triggers AI feedback |
 | `POST` | `/api/v1/assignments/{id}/final` | Submit final → triggers plagiarism check |
 | `POST` | `/api/v1/submissions/{id}/grade` | Grade a submission (teacher) |
+| `GET` | `/api/v1/assignments/{id}/gradebook` | Full grade matrix (teacher) |
+| `GET` | `/api/v1/assignments/{id}/gradebook/pdf` | Download PDF gradebook |
 | `GET` | `/api/v1/me/dashboard` | Role-aware dashboard stats |
 | `GET` | `/api/v1/admin/stats` | Platform-wide analytics (admin) |
-| `WS` | `/ws?token=<jwt>` | Real-time notifications |
+| `WS` | `/ws?token=<jwt>` | Real-time notification stream |
 
 ---
 
-## 🧪 Running Tests
+## Running Tests
 
 ```bash
 cd backend
@@ -206,33 +211,30 @@ pytest tests/ -v
 
 ---
 
-## 🚢 Deploying to Production
+## Deploying to Production
 
 1. **Set `CORS_ORIGINS`** in `backend/.env` to your production frontend domain.
-2. **Set a strong `JWT_SECRET`** (min 32 random chars).
-3. Build and push images:
+2. **Set a strong `JWT_SECRET`** — generate with `python -c "import secrets; print(secrets.token_hex(32))"`.
+3. Build and deploy:
    ```bash
    docker compose build
-   docker compose push
+   docker compose up -d
    ```
-4. Deploy on [Render](https://render.com), [Railway](https://railway.app), or any Docker host using `docker-compose.yml`.
+
+Deploy on [Render](https://render.com), [Railway](https://railway.app), or any Docker host using `docker-compose.yml`.
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
 - [ ] Google OAuth (student/teacher SSO)
-- [ ] File upload submissions (MinIO / S3)
-- [ ] PDF grade reports per student
-- [ ] Grade trend charts (recharts)
-- [ ] Mobile-responsive sidebar
-- [ ] Email notifications (submission confirmed, grade released)
-- [ ] ⌘K command palette
+- [ ] Email notifications (SMTP infrastructure ready — needs activation)
+- [ ] Cloud file storage (MinIO / S3) for submission attachments
 - [ ] Prometheus + Grafana monitoring
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feat/my-feature`
@@ -243,7 +245,7 @@ Please follow [Conventional Commits](https://www.conventionalcommits.org/) for c
 
 ---
 
-## 📄 License
+## License
 
 MIT © 2026 Sumanth D
 
