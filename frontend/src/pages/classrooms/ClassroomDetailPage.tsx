@@ -68,10 +68,15 @@ function AssignmentRow({ a, onClick, isTeacher }: { a: Assignment; onClick: () =
   const daysUntil = isPast ? -1 : (new Date(a.deadline).getTime() - Date.now()) / 86_400_000
   const dlVariant = isPast ? 'danger' : daysUntil < 1 ? 'warning' : daysUntil < 3 ? 'blue' : 'muted'
 
+  const handleRowClick = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return
+    onClick()
+  }
+
   return (
-    <button
-      onClick={onClick}
-      className="w-full flex items-center gap-4 px-4 py-3.5 hover:bg-white/3 transition-colors group text-left border-b border-white/4 last:border-0"
+    <div
+      onClick={handleRowClick}
+      className="w-full flex items-center gap-4 px-4 py-3.5 hover:bg-white/3 transition-colors group text-left border-b border-white/4 last:border-0 cursor-pointer"
     >
       <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
         a.is_published ? 'bg-accent/10 text-accent' : 'bg-white/5 text-zinc-600'
@@ -101,7 +106,7 @@ function AssignmentRow({ a, onClick, isTeacher }: { a: Assignment; onClick: () =
         {isTeacher && <PublishToggle a={a} />}
         <ChevronRight className="w-4 h-4 text-zinc-700 group-hover:text-zinc-400 transition-colors" />
       </div>
-    </button>
+    </div>
   )
 }
 
