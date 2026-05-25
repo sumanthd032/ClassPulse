@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Send, Sparkles, Clock, AlertCircle, CheckCircle2,
-  FileText, ChevronDown, ChevronUp, Award, MessageSquare
+  FileText, ChevronDown, ChevronUp, Award, MessageSquare, Paperclip, X
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { assignmentsApi } from '@/api/assignments'
@@ -13,6 +13,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
+import { FileUpload } from '@/components/ui/FileUpload'
 import { CommentThread } from '@/components/CommentThread'
 import { formatDate, deadlineLabel, isPastDeadline, scoreColor } from '@/lib/utils'
 import type { Submission, AIFeedback } from '@/types'
@@ -187,6 +188,7 @@ export default function AssignmentDetailPage() {
   const { user } = useAuthStore()
   const qc = useQueryClient()
   const [content, setContent] = useState('')
+  const [attachments, setAttachments] = useState<Array<{ file_id: string; filename: string; url: string }>>([])
   const isStudent = user?.role === 'student'
 
   const { data: assignment, isLoading: loadingA } = useQuery({
@@ -217,7 +219,7 @@ export default function AssignmentDetailPage() {
   })
 
   const draftMutation = useMutation({
-    mutationFn: () => submissionsApi.submitDraft(id!, { content }),
+    mutationFn: () => submissionsApi.submitDraft(id!, { content, attachments: attachments.map(a => a.file_id) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['my-submissions', id] })
       toast.success('Draft saved! AI feedback generating…')
@@ -226,11 +228,12 @@ export default function AssignmentDetailPage() {
   })
 
   const finalMutation = useMutation({
-    mutationFn: () => submissionsApi.submitFinal(id!, { content }),
+    mutationFn: () => submissionsApi.submitFinal(id!, { content, attachments: attachments.map(a => a.file_id) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['my-submissions', id] })
       toast.success('Final submission submitted!')
       setContent('')
+      setAttachments([])
     },
     onError: (e: any) => toast.error(e.response?.data?.detail ?? 'Submission failed'),
   })
@@ -330,8 +333,39 @@ export default function AssignmentDetailPage() {
             disabled={assignment.late_policy === 'block' && isPast}
             className="w-full bg-bg-elevated border border-white/8 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-600 resize-none focus:outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/20 transition-all disabled:opacity-50"
           />
+          
+          {/* Attachments */}
+          {attachments.length > 0 && (
+            <div className="bg-white/2 border border-white/4 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-semibold text-zinc-400">Attachments ({attachments.length})</p>
+              {attachments.map(att => (
+                <div key={att.file_id} className="flex items-center justify-between bg-white/5 p-2 rounded border border-white/8">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Paperclip className="w-3.5 h-3.5 flex-shrink-0 text-zinc-500" />
+                    <a href={att.url} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline truncate">
+                      {att.filename}
+                    </a>
+                  </div>
+                  <button
+                    onClick={() => setAttachments(attachments.filter(a => a.file_id !== att.file_id))}
+                    className="flex-shrink-0 text-zinc-500 hover:text-red-400 transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="flex justify-between items-center mt-3">
-            <p className="text-xs text-zinc-600">{content.length} characters</p>
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-zinc-600">{content.length} characters</p>
+              <FileUpload
+                onUpload={file => setAttachments([...attachments, { file_id: file.file_id, filename: file.filename, url: file.url }])}
+                maxSizeMb={50}
+                label="Attach file"
+              />
+            </div>
             <div className="flex gap-2">
               {canDraft && (
                 <Button

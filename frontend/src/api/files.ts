@@ -1,17 +1,20 @@
-import client from './client'
-import type { FileUploadResponse } from '@/types'
+import axios from 'axios'
+
+const api = axios.create({
+  baseURL: '/api/v1',
+})
 
 export const filesApi = {
-  upload: (file: File, onProgress?: (pct: number) => void) => {
+  upload: async (file: File): Promise<{ file_id: string; url: string; filename: string; size: number; mime_type: string }> => {
     const formData = new FormData()
     formData.append('file', file)
-    return client.post<FileUploadResponse>('/upload', formData, {
+    const response = await api.post('/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: e => {
-        if (onProgress && e.total) onProgress(Math.round((e.loaded * 100) / e.total))
-      },
-    }).then(r => r.data)
+    })
+    return response.data
   },
 
-  getUrl: (fileId: string) => `/api/v1/files/${fileId}`,
+  delete: async (fileId: string) => {
+    return api.delete(`/files/${fileId}`)
+  },
 }

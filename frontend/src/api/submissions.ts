@@ -2,10 +2,10 @@ import client from './client'
 import type { Submission, AIFeedback } from '@/types'
 
 export const submissionsApi = {
-  submitDraft: (assignmentId: string, data: { content?: string; file_url?: string }) =>
+  submitDraft: (assignmentId: string, data: { content?: string; file_url?: string; attachments?: string[] }) =>
     client.post<Submission>(`/assignments/${assignmentId}/drafts`, data).then(r => r.data),
 
-  submitFinal: (assignmentId: string, data: { content?: string; file_url?: string }) =>
+  submitFinal: (assignmentId: string, data: { content?: string; file_url?: string; attachments?: string[] }) =>
     client.post<Submission>(`/assignments/${assignmentId}/final`, data).then(r => r.data),
 
   mine: (assignmentId: string) =>
