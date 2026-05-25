@@ -2,11 +2,12 @@
 MinIO S3-compatible object storage client for file uploads.
 
 Usage:
-  - Profile pictures: minio.upload_file(file_content, "profiles/user_id.jpg")
-  - Assignment files: minio.upload_file(file_content, "assignments/submission_id/filename")
-  - Get download URL: url = minio.get_presigned_download_url("profiles/user_id.jpg")
+  - Profile pictures: upload_file(file_content, "profiles/user_id.jpg")
+  - Assignment files: upload_file(file_content, "assignments/submission_id/filename")
+  - Get download URL: url = get_presigned_download_url("profiles/user_id.jpg")
 """
 import logging
+from datetime import timedelta
 from io import BytesIO
 from minio import Minio
 from minio.error import S3Error
@@ -79,10 +80,11 @@ def get_presigned_download_url(object_name: str, expires_in_days: int = 7) -> st
         S3Error: If URL generation fails
     """
     try:
-        url = client.get_presigned_download_url(
+        url = client.get_presigned_url(
+            "GET",
             settings.MINIO_BUCKET,
             object_name,
-            expires=int(expires_in_days * 86400),  # Convert to seconds
+            expires=timedelta(days=expires_in_days),
         )
         return url
     except S3Error as e:
