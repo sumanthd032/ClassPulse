@@ -1,4 +1,5 @@
 """File upload routes with MinIO storage."""
+import logging
 import uuid
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,8 @@ from app.dependencies import get_current_user
 from app.models.file_attachment import FileAttachment
 from app.models.user import User
 from app.utils.minio_client import upload_file, get_presigned_download_url, delete_file
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Files"])
 
@@ -34,25 +37,30 @@ async def upload_file_endpoint(
     current_user: User = Depends(get_current_user),
 ):
     """Upload a file to MinIO storage. Returns file_id and download url."""
-    if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File type '{file.content_type}' is not allowed",
-        )
-
-    max_size = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
-    content = await file.read()
-    if len(content) > max_size:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File too large (max {settings.MAX_UPLOAD_SIZE_MB} MB)",
-        )
-
-    file_id = uuid.uuid4()
-    object_name = f"files/{file_id}/{file.filename or 'upload'}"
-
     try:
+        logger.info(f"Upload started: user={current_user.id}, filename={file.filename}, content_type={file.content_type}")
+        
+        if file.content_type not in ALLOWED_TYPES:
+            logger.warning(f"Rejected file type: {file.content_type}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File type '{file.content_type}' is not allowed",
+            )
+
+        max_size = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+        content = await file.read()
+        if len(content) > max_size:
+            logger.warning(f"File too large: {len(content)} > {max_size}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File too large (max {settings.MAX_UPLOAD_SIZE_MB} MB)",
+            )
+
+        file_id = uuid.uuid4()
+        object_name = f"files/{file_id}/{file.filename or 'upload'}"
+
         # Upload to MinIO
+        logger.info(f"Uploading to MinIO: {object_name}")
         upload_file(content, object_name)
 
         # Record in database
@@ -66,9 +74,11 @@ async def upload_file_endpoint(
         )
         db.add(attachment)
         await db.commit()
+        logger.info(f"File recorded in database: {file_id}")
 
         # Get presigned download URL
         download_url = get_presigned_download_url(object_name)
+        logger.info(f"Upload successful: {file_id}")
 
         return {
             "file_id": str(file_id),
@@ -77,7 +87,10 @@ async def upload_file_endpoint(
             "size": len(content),
             "mime_type": file.content_type,
         }
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.exception(f"Upload error: {str(e)}", exc_info=True)
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
