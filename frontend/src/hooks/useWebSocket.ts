@@ -4,17 +4,51 @@ import { useNotificationStore } from '@/stores/notificationStore'
 import toast from 'react-hot-toast'
 import type { WSEvent } from '@/types'
 
+const IS_DEV = (import.meta as any).env.DEV
+
 export function useWebSocket() {
   const { accessToken, isAuthenticated } = useAuthStore()
   const addNotification = useNotificationStore(s => s.addNotification)
   const wsRef = useRef<WebSocket | null>(null)
-  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const reconnectAttemptsRef = useRef(0)
-  const MAX_RECONNECT_ATTEMPTS = 3
+  const pollingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastNotificationIdRef = useRef<string>('')
 
-  const connect = () => {
+  // Fallback: Poll for notifications in dev mode
+  const pollNotifications = async () => {
     if (!isAuthenticated || !accessToken) return
-    if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) return
+
+    try {
+      const response = await fetch('/api/v1/notifications?limit=10', {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+      })
+      if (!response.ok) return
+
+      const notifications = await response.json()
+      // Only show new ones since last poll
+      const newOnes = notifications.filter((n: any) => n.id !== lastNotificationIdRef.current)
+      newOnes.forEach((n: any) => {
+        if (!n.is_read) {
+          toast(n.message, {
+            icon: eventIcon(n.type),
+            style: {
+              background: '#1A1A1E',
+              color: '#F4F4F5',
+              border: '1px solid rgba(255,255,255,0.08)',
+            },
+          })
+          addNotification(n)
+          lastNotificationIdRef.current = n.id
+        }
+      })
+    } catch (err) {
+      console.debug('[Polling] Error fetching notifications')
+    }
+
+    pollingTimeoutRef.current = setTimeout(pollNotifications, 5000) // Poll every 5s
+  }
+
+  const connectWebSocket = () => {
+    if (!isAuthenticated || !accessToken) return
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const wsUrl = `${protocol}://${window.location.host}/ws?token=${accessToken}`
@@ -23,7 +57,6 @@ export function useWebSocket() {
 
     ws.onopen = () => {
       console.log('[WS] Connected')
-      reconnectAttemptsRef.current = 0
     }
 
     ws.onmessage = e => {
@@ -51,28 +84,32 @@ export function useWebSocket() {
 
     ws.onclose = () => {
       console.log('[WS] Disconnected')
-      // Attempt to reconnect with exponential backoff
-      if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
-        reconnectAttemptsRef.current += 1
-        const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000)
-        reconnectTimeoutRef.current = setTimeout(connect, delay)
-      }
     }
 
     ws.onerror = () => {
-      console.debug('[WS] Connection error (WebSocket proxy may not be configured)')
+      if (!IS_DEV) {
+        console.error('[WS] Connection failed')
+      }
     }
   }
 
   useEffect(() => {
-    connect()
+    if (!isAuthenticated || !accessToken) return
+
+    if (IS_DEV) {
+      // In dev: use polling instead of WebSocket (Vite proxy issue)
+      pollNotifications()
+    } else {
+      // In production: use WebSocket
+      connectWebSocket()
+    }
 
     return () => {
       if (wsRef.current) {
         wsRef.current.close()
       }
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current)
+      if (pollingTimeoutRef.current) {
+        clearTimeout(pollingTimeoutRef.current)
       }
     }
   }, [isAuthenticated, accessToken])
