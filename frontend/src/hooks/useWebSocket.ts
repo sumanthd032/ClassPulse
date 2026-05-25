@@ -8,9 +8,13 @@ export function useWebSocket() {
   const { accessToken, isAuthenticated } = useAuthStore()
   const addNotification = useNotificationStore(s => s.addNotification)
   const wsRef = useRef<WebSocket | null>(null)
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectAttemptsRef = useRef(0)
+  const MAX_RECONNECT_ATTEMPTS = 3
 
-  useEffect(() => {
+  const connect = () => {
     if (!isAuthenticated || !accessToken) return
+    if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) return
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const wsUrl = `${protocol}://${window.location.host}/ws?token=${accessToken}`
@@ -19,12 +23,12 @@ export function useWebSocket() {
 
     ws.onopen = () => {
       console.log('[WS] Connected')
+      reconnectAttemptsRef.current = 0
     }
 
     ws.onmessage = e => {
       try {
         const event: WSEvent = JSON.parse(e.data)
-        // Show a toast
         toast(event.message, {
           icon: eventIcon(event.type),
           style: {
@@ -33,7 +37,6 @@ export function useWebSocket() {
             border: '1px solid rgba(255,255,255,0.08)',
           },
         })
-        // Push into notification store (will appear in bell)
         addNotification({
           id: crypto.randomUUID(),
           user_id: '',
@@ -46,12 +49,32 @@ export function useWebSocket() {
       } catch { /* ignore malformed messages */ }
     }
 
-    ws.onclose = () => console.log('[WS] Disconnected')
-    ws.onerror = (e) => {
-      console.error('[WS] Error:', e)
+    ws.onclose = () => {
+      console.log('[WS] Disconnected')
+      // Attempt to reconnect with exponential backoff
+      if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {
+        reconnectAttemptsRef.current += 1
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000)
+        reconnectTimeoutRef.current = setTimeout(connect, delay)
+      }
     }
 
-    return () => ws.close()
+    ws.onerror = () => {
+      console.debug('[WS] Connection error (WebSocket proxy may not be configured)')
+    }
+  }
+
+  useEffect(() => {
+    connect()
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current)
+      }
+    }
   }, [isAuthenticated, accessToken])
 }
 
