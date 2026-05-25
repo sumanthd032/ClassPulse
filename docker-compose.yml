@@ -149,6 +149,17 @@ services:
       - api
     restart: unless-stopped
 
+  # ----------------------------------------------------------
+  # Adminer (Database GUI)  →  http://localhost:8080
+  # ----------------------------------------------------------
+  adminer:
+    image: adminer:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    restart: unless-stopped
+
 volumes:
   pgdata:
   uploads:
