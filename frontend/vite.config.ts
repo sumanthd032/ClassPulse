@@ -17,8 +17,10 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/ws': {
-        target: process.env.VITE_WS_URL ?? 'ws://localhost:8000',
+        target: process.env.VITE_WS_URL ?? 'http://localhost:8000',
         ws: true,
+        changeOrigin: true,
+        rewriteWsUpgradeToHttp: true,
       },
     },
   },

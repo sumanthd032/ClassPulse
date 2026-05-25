@@ -17,7 +17,9 @@ export function useWebSocket() {
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
 
-    ws.onopen = () => console.log('[WS] Connected')
+    ws.onopen = () => {
+      console.log('[WS] Connected')
+    }
 
     ws.onmessage = e => {
       try {
@@ -45,7 +47,9 @@ export function useWebSocket() {
     }
 
     ws.onclose = () => console.log('[WS] Disconnected')
-    ws.onerror = () => console.warn('[WS] Error')
+    ws.onerror = (e) => {
+      console.error('[WS] Error:', e)
+    }
 
     return () => ws.close()
   }, [isAuthenticated, accessToken])
