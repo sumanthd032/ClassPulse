@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     # LLM (Google Gemini)
     # -----------------------------------------------------------------------
     LLM_API_KEY: str
-    LLM_MODEL: str = "gemini-2.0-flash"     # Override in .env for other models
+    LLM_MODEL: str = "gemini-2.5-flash"     # Override in .env for other models
 
     # -----------------------------------------------------------------------
     # Feature Flags
