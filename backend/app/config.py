@@ -50,10 +50,18 @@ class Settings(BaseSettings):
     EMAIL_ENABLED: bool = False
 
     # -----------------------------------------------------------------------
+    # MinIO (Object Storage)
+    # -----------------------------------------------------------------------
+    MINIO_URL: str = "http://minio:9000"
+    MINIO_ACCESS_KEY: str = "minioadmin"
+    MINIO_SECRET_KEY: str = "minioadmin"
+    MINIO_BUCKET: str = "classpulse"
+
+    # -----------------------------------------------------------------------
     # File uploads
     # -----------------------------------------------------------------------
     UPLOAD_DIR: str = "/uploads"
-    MAX_UPLOAD_SIZE_MB: int = 10
+    MAX_UPLOAD_SIZE_MB: int = 50
 
     # -----------------------------------------------------------------------
     # CORS

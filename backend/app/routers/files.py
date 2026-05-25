@@ -1,9 +1,6 @@
-"""File upload routes."""
+"""File upload routes with MinIO storage."""
 import uuid
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -12,6 +9,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.file_attachment import FileAttachment
 from app.models.user import User
+from app.utils.minio_client import upload_file, get_presigned_download_url, delete_file
 
 router = APIRouter(tags=["Files"])
 
@@ -30,12 +28,12 @@ ALLOWED_TYPES = {
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED, summary="Upload a file")
-async def upload_file(
+async def upload_file_endpoint(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Upload a file. Returns file_id and download url."""
+    """Upload a file to MinIO storage. Returns file_id and download url."""
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -51,29 +49,40 @@ async def upload_file(
         )
 
     file_id = uuid.uuid4()
-    upload_dir = Path(settings.UPLOAD_DIR) / str(file_id)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    dest = upload_dir / (file.filename or "upload")
-    dest.write_bytes(content)
+    object_name = f"files/{file_id}/{file.filename or 'upload'}"
 
-    attachment = FileAttachment(
-        id=file_id,
-        uploader_id=current_user.id,
-        original_filename=file.filename or "upload",
-        stored_path=str(dest),
-        file_size_bytes=len(content),
-        mime_type=file.content_type,
-    )
-    db.add(attachment)
-    await db.commit()
+    try:
+        # Upload to MinIO
+        upload_file(content, object_name)
 
-    return {
-        "file_id": str(file_id),
-        "filename": file.filename,
-        "url": f"/api/v1/files/{file_id}",
-        "size": len(content),
-        "mime_type": file.content_type,
-    }
+        # Record in database
+        attachment = FileAttachment(
+            id=file_id,
+            uploader_id=current_user.id,
+            original_filename=file.filename or "upload",
+            stored_path=object_name,  # Store MinIO path
+            file_size_bytes=len(content),
+            mime_type=file.content_type,
+        )
+        db.add(attachment)
+        await db.commit()
+
+        # Get presigned download URL
+        download_url = get_presigned_download_url(object_name)
+
+        return {
+            "file_id": str(file_id),
+            "filename": file.filename,
+            "url": download_url,
+            "size": len(content),
+            "mime_type": file.content_type,
+        }
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"File upload failed: {str(e)}",
+        )
 
 
 @router.get("/files/{file_id}", summary="Download a file")
@@ -86,10 +95,13 @@ async def download_file(
     attachment = result.scalars().first()
     if not attachment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    if not Path(attachment.stored_path).exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk")
-    return FileResponse(
-        attachment.stored_path,
-        media_type=attachment.mime_type or "application/octet-stream",
-        filename=attachment.original_filename,
-    )
+
+    try:
+        # Get presigned URL from MinIO
+        download_url = get_presigned_download_url(attachment.stored_path)
+        return {"url": download_url, "filename": attachment.original_filename}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Download failed: {str(e)}",
+        )

@@ -40,6 +40,28 @@ services:
       retries: 10
 
   # ----------------------------------------------------------
+  # MinIO (Object Storage - S3 compatible)  →  http://localhost:9000
+  # MinIO Console:  →  http://localhost:9001
+  # ----------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ----------------------------------------------------------
   # Redis 7  (internal only)
   # ----------------------------------------------------------
   redis:
@@ -163,3 +185,4 @@ services:
 volumes:
   pgdata:
   uploads:
+  minio_data:
