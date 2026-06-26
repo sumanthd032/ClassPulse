@@ -4,8 +4,8 @@
 
 ### The classroom platform that grades with you, not after you.
 
-Students submit drafts and get **instant, rubric-aligned AI feedback** before the deadline.
-Teachers grade in half the time with **AI-suggested scores** and **real-time plagiarism flags**.
+Students submit drafts and get instant, rubric-aligned AI feedback before the deadline.
+Teachers grade in half the time with AI-suggested scores and real-time plagiarism flags.
 
 [![CI](https://github.com/sumanthd032/ClassPulse/actions/workflows/ci.yml/badge.svg)](https://github.com/sumanthd032/ClassPulse/actions/workflows/ci.yml)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
@@ -14,44 +14,40 @@ Teachers grade in half the time with **AI-suggested scores** and **real-time pla
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL_16-4169E1?logo=postgresql&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-violet)
 
-[Quick Start](#-quick-start) · [How It Works](#-the-core-loop) · [Architecture](#-architecture) · [API](#-api)
+[Quick Start](#quick-start) · [How It Works](#the-core-loop) · [Architecture](#high-level-architecture) · [API](#api)
 
 </div>
 
 ---
 
-## 🎯 The Core Loop
+## The Core Loop
 
-Most platforms only see student work **once** — after the deadline, when it's too late to learn anything. ClassPulse closes the loop *before* submission.
+Most platforms only see student work once, after the deadline, when it is too late to learn anything. ClassPulse closes the loop before submission.
 
-```
-   ┌─────────┐   draft    ┌──────────────┐   feedback   ┌─────────┐
-   │ Student │ ─────────▶ │  Gemini AI   │ ───────────▶ │ Student │
-   │         │            │  reads the   │   per rubric │ revises │
-   │         │ ◀───────── │   rubric     │   criterion  │         │
-   └─────────┘            └──────────────┘              └────┬────┘
-        │                                                    │ final
-        │            ┌──────────────────────────┐           │
-        └──────────▶ │ TF-IDF plagiarism scan +  │ ◀─────────┘
-                     │ AI-suggested grade for the │
-                     │        teacher             │
-                     └──────────────────────────┘
+```mermaid
+flowchart LR
+    A[Student submits draft] --> B[Gemini scores every<br/>rubric criterion]
+    B --> C[Targeted feedback<br/>in seconds]
+    C --> D[Student revises]
+    D -->|resubmit before deadline| A
+    D -->|final submission| E[TF-IDF plagiarism scan<br/>+ AI-suggested grade]
+    E --> F[Teacher reviews,<br/>tweaks, releases grades]
 ```
 
-1. **Submit a draft.** A Celery worker sends it to Gemini, which scores every rubric criterion and writes targeted feedback — in seconds.
-2. **Revise and resubmit.** Up to *N* drafts before the deadline. The student improves; the teacher does nothing.
-3. **Final submission triggers a plagiarism scan.** Every final is compared against the cohort; pairs above 80% cosine similarity flag the teacher in real time over WebSocket.
-4. **Teacher grades fast.** AI pre-fills a suggested level and marks per criterion. The teacher accepts, tweaks, or overrides — then releases grades to the class.
+1. **Submit a draft.** A Celery worker sends it to Gemini, which scores every rubric criterion and writes targeted feedback in seconds.
+2. **Revise and resubmit.** Up to N drafts before the deadline. The student improves while the teacher does nothing.
+3. **Final submission triggers a plagiarism scan.** Every final is compared against the cohort. Pairs above 80% cosine similarity flag the teacher in real time over WebSocket.
+4. **Teacher grades fast.** AI pre-fills a suggested level and marks per criterion. The teacher accepts, tweaks, or overrides, then releases grades to the class.
 
 ---
 
-## ✨ What You Get
+## What You Get
 
 <table>
 <tr>
 <td width="33%" valign="top">
 
-### 👩‍🎓 Students
+### Students
 - Instant AI feedback on every draft
 - A clear rubric breakdown, not just a number
 - File attachments on submissions
@@ -61,19 +57,19 @@ Most platforms only see student work **once** — after the deadline, when it's 
 </td>
 <td width="33%" valign="top">
 
-### 👨‍🏫 Teachers
+### Teachers
 - AI-suggested scores per criterion
 - Real-time plagiarism alerts
-- Full gradebook → one-click PDF export
-- Classroom analytics & at-risk detection
+- Full gradebook with one-click PDF export
+- Classroom analytics and at-risk detection
 - Stream, materials, topics, comments
 
 </td>
 <td width="33%" valign="top">
 
-### 🛡️ Admins / HOD
+### Admins / HOD
 - Platform-wide analytics
-- User & classroom oversight
+- User and classroom oversight
 - Role-based access control
 - Automated weekly at-risk reports
 
@@ -81,43 +77,68 @@ Most platforms only see student work **once** — after the deadline, when it's 
 </tr>
 </table>
 
-> **Always-on automation** — Celery Beat applies late penalties at midnight, fires deadline reminders at 8am, and runs at-risk detection weekly. **No cron cowboy required.**
+> **Always-on automation.** Celery Beat applies late penalties at midnight, fires deadline reminders at 8am, and runs at-risk detection weekly. No manual cron work required.
 
 ---
 
-## 🏗 Architecture
+## High-Level Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                     Browser (React)                      │
-│  Vite · Tailwind · Zustand · React Query · Framer Motion │
-└───────────────────┬─────────────────────────────────────┘
-                    │ HTTP /api  +  WS /ws
-┌───────────────────▼─────────────────────────────────────┐
-│                  FastAPI  (uvicorn)                      │
-│  Auth · Classrooms · Assignments · Submissions           │
-│  Grading · Notifications · Dashboard · Admin             │
-└───────┬──────────────────┬──────────────────┬───────────┘
-        │ SQLAlchemy async  │ Redis pub/sub    │ S3 API
-┌───────▼────────┐  ┌───────▼──────────┐  ┌────▼───────────┐
-│  PostgreSQL 16 │  │     Redis 7      │  │     MinIO      │
-│   (all data)   │  │ broker · tokens  │  │ file storage   │
-└────────────────┘  └───────┬──────────┘  └────────────────┘
-                            │ Celery tasks
-                 ┌──────────▼──────────────────────┐
-                 │         Celery Workers           │
-                 │  AI feedback · Similarity check  │
-                 │  Late penalties · Reminders      │
-                 └─────────────────────────────────┘
-```
+The big picture: a React SPA talks to a FastAPI backend, which persists state, streams real-time events, and offloads heavy work (AI feedback, plagiarism, scheduled jobs) to background workers.
 
-**Stack** — React 18 · TypeScript · FastAPI · Python 3.11 · SQLAlchemy (async) · Pydantic v2 · PostgreSQL 16 · Redis 7 · MinIO · Celery · Google Gemini (`gemini-2.5-flash`) · Docker.
+```mermaid
+flowchart LR
+    Users(["Students / Teachers / Admins"]) --> FE["React SPA"]
+    FE -->|"HTTP /api + WS /ws"| API["FastAPI"]
+    API --> DB[("PostgreSQL")]
+    API --> Cache[("Redis")]
+    API --> Store[("MinIO")]
+    API -->|"enqueue"| Workers["Celery Workers"]
+    Workers --> AI["Google Gemini"]
+    Workers --> DB
+    Cache <-->|"pub/sub"| API
+```
 
 ---
 
-## 🚀 Quick Start
+## Architecture
 
-**Prerequisites:** Docker + Docker Compose, and a [Google AI Studio](https://aistudio.google.com/) (Gemini) API key.
+A closer look at the components and what flows between them.
+
+```mermaid
+flowchart TB
+    subgraph Client["Browser"]
+        FE["React 18 + Vite<br/>Tailwind / Zustand / React Query / Framer Motion"]
+    end
+
+    subgraph Backend["FastAPI (uvicorn)"]
+        Routers["Routers<br/>Auth / Classrooms / Assignments / Submissions<br/>Grading / Notifications / Dashboard / Admin"]
+        Services["Services<br/>business logic, pure async"]
+        Routers --> Services
+    end
+
+    subgraph Async["Background"]
+        Workers["Celery Workers<br/>AI feedback / similarity<br/>late penalties / reminders"]
+        Beat["Celery Beat<br/>scheduler"]
+        Beat --> Workers
+    end
+
+    FE -->|"REST + WebSocket"| Routers
+    Services --> PG[("PostgreSQL 16<br/>all data")]
+    Services --> RD[("Redis 7<br/>tokens / broker / rate limit")]
+    Services --> MIN[("MinIO<br/>file attachments")]
+    Services -.->|"enqueue task"| Workers
+    Workers --> GEM["Google Gemini<br/>gemini-2.5-flash"]
+    Workers --> PG
+    RD <-->|"pub/sub"| Routers
+```
+
+**Stack:** React 18, TypeScript, FastAPI, Python 3.11, SQLAlchemy (async), Pydantic v2, PostgreSQL 16, Redis 7, MinIO, Celery, Google Gemini (`gemini-2.5-flash`), Docker.
+
+---
+
+## Quick Start
+
+**Prerequisites:** Docker and Docker Compose, plus a [Google AI Studio](https://aistudio.google.com/) (Gemini) API key.
 
 ```bash
 git clone https://github.com/sumanthd032/ClassPulse.git
@@ -144,19 +165,19 @@ docker compose up --build
 | API | http://localhost:8000 |
 | Swagger docs | http://localhost:8000/api/docs |
 
-First build takes ~3 min; after that it's cached and starts in seconds.
+First build takes about 3 minutes. After that it is cached and starts in seconds.
 
 <details>
-<summary><b>Hot-reload dev setup (run backend & frontend separately)</b></summary>
+<summary><b>Hot-reload dev setup (run backend and frontend separately)</b></summary>
 
 ```bash
-# Backend — db + redis + migrate + api(--reload) + worker + beat
+# Backend: db + redis + migrate + api(--reload) + worker + beat
 cd backend
-cp .env.example .env          # set JWT_SECRET + LLM_API_KEY
+cp .env.example .env          # set JWT_SECRET and LLM_API_KEY
 docker compose -f docker-compose.dev.yml up --build
-# Postgres → localhost:5433, Redis → localhost:6380
+# Postgres on localhost:5433, Redis on localhost:6380
 
-# Frontend — Vite proxies /api and /ws to :8000 automatically
+# Frontend: Vite proxies /api and /ws to :8000 automatically
 cd frontend
 npm install
 npm run dev                   # http://localhost:3000
@@ -166,14 +187,14 @@ npm run dev                   # http://localhost:3000
 
 ---
 
-## 📡 API
+## API
 
 Interactive Swagger UI lives at `/api/docs`. The endpoints that carry the product:
 
 | Method | Path | What it does |
 |---|---|---|
-| `POST` | `/api/v1/assignments/{id}/drafts` | Submit a draft → triggers AI feedback |
-| `POST` | `/api/v1/assignments/{id}/final` | Submit final → triggers plagiarism scan |
+| `POST` | `/api/v1/assignments/{id}/drafts` | Submit a draft, triggers AI feedback |
+| `POST` | `/api/v1/assignments/{id}/final` | Submit final, triggers plagiarism scan |
 | `POST` | `/api/v1/submissions/{id}/grade` | Grade a submission (teacher) |
 | `GET` | `/api/v1/assignments/{id}/gradebook` | Full grade matrix |
 | `GET` | `/api/v1/assignments/{id}/gradebook/pdf` | Download gradebook as PDF |
@@ -183,7 +204,7 @@ Interactive Swagger UI lives at `/api/docs`. The endpoints that carry the produc
 
 ---
 
-## 📂 Project Layout
+## Project Layout
 
 ```
 ClassPulse/
@@ -199,7 +220,7 @@ ClassPulse/
 ├── frontend/                # React + Vite SPA
 │   └── src/
 │       ├── api/             # Typed API clients (one per domain)
-│       ├── components/      # UI primitives, layout, charts, ⌘K palette
+│       ├── components/      # UI primitives, layout, charts, command palette
 │       ├── pages/           # Route-level screens
 │       ├── stores/          # Zustand state
 │       └── hooks/           # useAuth, useWebSocket
@@ -208,6 +229,6 @@ ClassPulse/
 
 ---
 
-## 📄 License
+## License
 
-[MIT](LICENSE) © 2026 Sumanth D
+[MIT](LICENSE) Copyright 2026 Sumanth D
