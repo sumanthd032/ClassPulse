@@ -1,7 +1,6 @@
 """
 Grading service — grade submission CRUD and grading queue.
 """
-from typing import List
 from uuid import UUID
 
 from fastapi import HTTPException, status

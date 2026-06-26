@@ -6,7 +6,6 @@ GET /me/grades                 — returns all released grades for the student
 GET /me/grade-trends           — returns chronological grade data for charts
 GET /classrooms/{id}/analytics — returns grade distribution for a classroom
 """
-from typing import List
 from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession

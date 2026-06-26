@@ -10,7 +10,6 @@ The teacher is notified via DB notification so they can review, adjust, and rele
 """
 import json
 import logging
-from uuid import UUID as PyUUID
 
 import redis
 from sqlalchemy import create_engine

@@ -10,7 +10,7 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.file_attachment import FileAttachment
 from app.models.user import User
-from app.utils.minio_client import upload_file, get_presigned_download_url, delete_file
+from app.utils.minio_client import upload_file, get_presigned_download_url
 
 logger = logging.getLogger(__name__)
 
